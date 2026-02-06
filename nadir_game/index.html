@@ -1,0 +1,128 @@
+/**
+ * Frontend Client for Nadir Economy Empire
+ * Connects to the Node.js API
+ */
+
+import React, { useState, useEffect } from 'react';
+import { Briefcase, TrendingUp, Trophy, Wallet, MousePointer2 } from 'lucide-react';
+
+// عنوان السيرفر (استبدله بعنوان سيرفرك عند النشر)
+const API_BASE = "http://localhost:5000/api";
+
+// توليد البيانات للعرض فقط (العمليات الحسابية في السيرفر)
+const CLIENT_COMPANIES = Array.from({ length: 300 }, (_, i) => ({
+    id: i.toString(),
+    name: `مؤسسة نادير #${i + 1}`,
+    cost: Math.floor(1000 * Math.pow(1.18, i)),
+    income: Math.floor(60 * Math.pow(1.18, i)),
+}));
+
+export default function App() {
+    const [player, setPlayer] = useState(null);
+    const [deviceId] = useState(localStorage.getItem('nadir_id') || generateId());
+    const [activeTab, setActiveTab] = useState('market');
+    const [loading, setLoading] = useState(true);
+
+    function generateId() {
+        const id = 'user_' + Math.random().toString(36).substr(2, 9);
+        localStorage.setItem('nadir_id', id);
+        return id;
+    }
+
+    // جلب بيانات اللاعب من السيرفر
+    const fetchPlayerData = async () => {
+        try {
+            const res = await fetch(`${API_BASE}/player/${deviceId}`);
+            const data = await res.json();
+            setPlayer(data);
+            setLoading(false);
+        } catch (err) {
+            console.error("Connection error to Server");
+        }
+    };
+
+    useEffect(() => {
+        fetchPlayerData();
+        // جلب الأرباح تلقائياً كل 10 ثوانٍ
+        const interval = setInterval(() => {
+            fetch(`${API_BASE}/collect`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deviceId })
+            }).then(res => res.json()).then(data => setPlayer(data));
+        }, 10000);
+        return () => clearInterval(interval);
+    }, []);
+
+    const handleBuy = async (id, amount) => {
+        const res = await fetch(`${API_BASE}/buy`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ deviceId, companyId: id, amount })
+        });
+        if (res.ok) {
+            const updatedPlayer = await res.json();
+            setPlayer(updatedPlayer);
+        } else {
+            alert("فشلت العملية: رصيد غير كافٍ أو خطأ سيرفر");
+        }
+    };
+
+    if (loading || !player) return <div className="h-screen bg-slate-950 flex items-center justify-center text-emerald-500 font-black">جاري مزامنة بيانات Nadir مع السيرفر...</div>;
+
+    return (
+        <div className="min-h-screen bg-slate-950 text-white font-['Cairo'] p-4" dir="rtl">
+            {/* Stats Header */}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
+                <div className="bg-slate-900 p-4 rounded-2xl border border-emerald-500/30 text-center">
+                    <p className="text-xs text-slate-500 mb-1">الرصيد المحمي</p>
+                    <p className="text-2xl font-black text-emerald-400">${Math.floor(player.balance).toLocaleString()}</p>
+                </div>
+                <div className="bg-slate-900 p-4 rounded-2xl border border-purple-500/30 text-center">
+                    <p className="text-xs text-slate-500 mb-1">النفوذ</p>
+                    <p className="text-2xl font-black text-purple-400">{player.influence.toLocaleString()}</p>
+                </div>
+                <div className="hidden md:block bg-slate-900 p-4 rounded-2xl border border-blue-500/30 text-center">
+                    <p className="text-xs text-slate-500 mb-1">معرف السيرفر</p>
+                    <p className="text-sm font-mono text-blue-400">{deviceId}</p>
+                </div>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex bg-slate-900 p-1 rounded-xl mb-6">
+                <button onClick={() => setActiveTab('market')} className={`flex-1 py-3 font-bold rounded-lg ${activeTab === 'market' ? 'bg-emerald-600' : ''}`}>السوق (300)</button>
+                <button onClick={() => setActiveTab('assets')} className={`flex-1 py-3 font-bold rounded-lg ${activeTab === 'assets' ? 'bg-emerald-600' : ''}`}>ممتلكاتي</button>
+            </div>
+
+            {/* List */}
+            {activeTab === 'market' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {CLIENT_COMPANIES.slice(0, 50).map(c => {
+                        const maxBuy = Math.floor(player.balance / c.cost);
+                        return (
+                            <div key={c.id} className="bg-slate-900 p-5 rounded-3xl border border-white/5">
+                                <h3 className="font-black mb-1">{c.name}</h3>
+                                <p className="text-xs text-slate-500 mb-4 italic text-left">+{c.income}$/ث</p>
+                                <div className="flex gap-2">
+                                    <button onClick={() => handleBuy(c.id, 1)} className="flex-1 bg-emerald-600 p-3 rounded-xl text-xs font-bold">شراء (${c.cost.toLocaleString()})</button>
+                                    <button onClick={() => handleBuy(c.id, maxBuy)} disabled={maxBuy <= 0} className="bg-yellow-600 px-4 rounded-xl text-xs font-black">الكل ({maxBuy})</button>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            {activeTab === 'assets' && (
+                <div className="space-y-2">
+                    {Object.entries(player.ownedCompanies).map(([id, count]) => (
+                        <div key={id} className="bg-slate-900/50 p-4 rounded-xl flex justify-between border border-white/5">
+                            <span className="font-bold text-emerald-400">{CLIENT_COMPANIES[id]?.name}</span>
+                            <span className="font-black">عدد: {count}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
